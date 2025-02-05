@@ -23,7 +23,7 @@ jobs:
             exit 1
           }
 
-      - name: Check if Service Exists
+      - name: Check if Service Exists and Stop It
         shell: powershell
         run: |
           $serviceName = "SampleWindowsService"
@@ -31,6 +31,7 @@ jobs:
           if ($service) {
             Write-Host "Service exists. Stopping and removing it..."
             Stop-Service -Name $serviceName -Force
+            Start-Sleep -Seconds 2
             & "C:\nssm\nssm.exe" remove $serviceName confirm
           }
 
@@ -40,18 +41,40 @@ jobs:
           $nssm = "C:\nssm\nssm.exe"
           $serviceName = "SampleWindowsService"
           $servicePath = "C:\Deploy\sample-package.exe"
+
+          # Install the service
           & $nssm install $serviceName $servicePath
           & $nssm set $serviceName Start SERVICE_AUTO_START
+
+          # Set Logging for Debugging
+          & $nssm set $serviceName AppStdout "C:\Deploy\service.log"
+          & $nssm set $serviceName AppStderr "C:\Deploy\service-error.log"
+          & $nssm set $serviceName AppRotateFiles 1
+
+          # Start the service
           & $nssm start $serviceName
 
       - name: Verify Service Status
         shell: powershell
         run: |
-          Start-Sleep -Seconds 5  # Wait for the service to start
-          $service = Get-Service -Name "SampleWindowsService"
+          Start-Sleep -Seconds 5
+          $service = Get-Service -Name "SampleWindowsService" -ErrorAction SilentlyContinue
+          if (-Not $service) {
+            Write-Host "ERROR: Service not found!"
+            exit 1
+          }
           if ($service.Status -ne "Running") {
             Write-Host "ERROR: Service failed to start!"
+            Write-Host "Checking logs..."
+            Get-Content "C:\Deploy\service-error.log"
             exit 1
           } else {
             Write-Host "Service is running successfully."
           }
+
+      - name: Debugging Information (if failure)
+        if: failure()
+        shell: powershell
+        run: |
+          Write-Host "Fetching Windows Event Logs..."
+          Get-WinEvent -LogName Application | Where-Object { $_.Message -match "SampleWindowsService" } | Select-Object -First 10
