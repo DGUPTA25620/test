@@ -3,39 +3,55 @@ name: Deploy Windows Service
 on:
   push:
     branches:
-      - main  # Change this based on your branch strategy
+      - main
   workflow_dispatch:
 
 jobs:
   deploy:
-    runs-on: windows-latest  # Use Windows runner for Windows Service deployment
+    runs-on: self-hosted  # Use self-hosted runner for admin rights
 
     steps:
-      - name: Checkout Code
+      - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Download Package (if stored in GitHub Packages)
+      - name: Verify Deployment Package
+        shell: powershell
         run: |
-          gh release download latest --pattern "sample-package.zip" --repo <your-org/your-repo>
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract Package
-        run: |
-          Expand-Archive -Path sample-package.zip -DestinationPath C:\deploy\sample-app -Force
-
-      - name: Install Windows Service
-        run: |
-          $serviceName = "SampleAppService"
-          $exePath = "C:\deploy\sample-app\YourService.exe"
-
-          if (Get-Service -Name $serviceName -ErrorAction SilentlyContinue) {
-            Stop-Service -Name $serviceName -Force
-            sc.exe delete $serviceName
+          $servicePath = "C:\Deploy\sample-package.exe"
+          if (-Not (Test-Path $servicePath)) {
+            Write-Host "ERROR: Deployment package not found at $servicePath"
+            exit 1
           }
 
-          sc.exe create $serviceName binPath= $exePath start= auto
-          Start-Service -Name $serviceName
+      - name: Check if Service Exists
+        shell: powershell
+        run: |
+          $serviceName = "SampleWindowsService"
+          $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+          if ($service) {
+            Write-Host "Service exists. Stopping and removing it..."
+            Stop-Service -Name $serviceName -Force
+            & "C:\nssm\nssm.exe" remove $serviceName confirm
+          }
+
+      - name: Install Windows Service with NSSM
+        shell: powershell
+        run: |
+          $nssm = "C:\nssm\nssm.exe"
+          $serviceName = "SampleWindowsService"
+          $servicePath = "C:\Deploy\sample-package.exe"
+          & $nssm install $serviceName $servicePath
+          & $nssm set $serviceName Start SERVICE_AUTO_START
+          & $nssm start $serviceName
 
       - name: Verify Service Status
-        run: Get-Service -Name "SampleAppService"
+        shell: powershell
+        run: |
+          Start-Sleep -Seconds 5  # Wait for the service to start
+          $service = Get-Service -Name "SampleWindowsService"
+          if ($service.Status -ne "Running") {
+            Write-Host "ERROR: Service failed to start!"
+            exit 1
+          } else {
+            Write-Host "Service is running successfully."
+          }
