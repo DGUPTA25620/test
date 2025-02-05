@@ -8,7 +8,7 @@ on:
 
 jobs:
   deploy:
-    runs-on: self-hosted  # Switch to self-hosted for admin rights
+    runs-on: self-hosted  # Use self-hosted runner for admin rights
 
     steps:
       - name: Check out repository
@@ -23,23 +23,35 @@ jobs:
             exit 1
           }
 
+      - name: Check if Service Exists
+        shell: powershell
+        run: |
+          $serviceName = "SampleWindowsService"
+          $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+          if ($service) {
+            Write-Host "Service exists. Stopping and removing it..."
+            Stop-Service -Name $serviceName -Force
+            & "C:\nssm\nssm.exe" remove $serviceName confirm
+          }
+
       - name: Install Windows Service with NSSM
         shell: powershell
         run: |
           $nssm = "C:\nssm\nssm.exe"
           $serviceName = "SampleWindowsService"
           $servicePath = "C:\Deploy\sample-package.exe"
-
-          if (Test-Path $servicePath) {
-            & $nssm install $serviceName $servicePath
-            & $nssm set $serviceName Start SERVICE_AUTO_START
-            & $nssm start $serviceName
-          } else {
-            Write-Host "ERROR: Service executable not found!"
-            exit 1
-          }
+          & $nssm install $serviceName $servicePath
+          & $nssm set $serviceName Start SERVICE_AUTO_START
+          & $nssm start $serviceName
 
       - name: Verify Service Status
         shell: powershell
         run: |
-          Get-Service -Name "SampleWindowsService"
+          Start-Sleep -Seconds 5  # Wait for the service to start
+          $service = Get-Service -Name "SampleWindowsService"
+          if ($service.Status -ne "Running") {
+            Write-Host "ERROR: Service failed to start!"
+            exit 1
+          } else {
+            Write-Host "Service is running successfully."
+          }
